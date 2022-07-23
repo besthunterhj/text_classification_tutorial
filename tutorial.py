@@ -1,6 +1,6 @@
 import csv
 import re
-from typing import Dict
+from typing import Dict, List, Tuple
 import torch
 from torch.optim import Adam
 from collections import Counter
@@ -10,9 +10,17 @@ from torchtext.vocab import vocab as vc
 from torchtext.data import get_tokenizer
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
+from sklearn.metrics import accuracy_score, classification_report
+
+device = torch.device(
+    "cuda" if torch.cuda.is_available() else "cpu"
+)
 
 
 # 1. Create a class named AGNewsDataset to read the train, valid, test data
+from tqdm import tqdm
+
+
 class AGNewsDataset(Dataset):
     def __init__(self, fp: str):
         """
@@ -152,7 +160,7 @@ class RNNTextClassifier(nn.Module):
         )
 
     # 5.2 Init the process of the model
-    def forward(self, x: torch.tensor):
+    def forward(self, x: torch.tensor) -> torch.tensor:
         """
 
         :param x: the input of the model, its size must be [batch_size, text_len]
@@ -173,12 +181,35 @@ class RNNTextClassifier(nn.Module):
         return y_hat
 
 
-def pad(token_indexes: list):
-    ...
+# 8** Init the padding function of the collection function
+def pad(token_indexes: List[int], max_len: int, default_padding_val: int = 0) -> List[int]:
+    """
+    Normalize the length of current list of token_indexes, so it can change to part of tensor
+    :param default_padding_val: the default index of the character <pad>
+    :param token_indexes: the indexes for tokens of current text
+    :param max_len: the maximum length of normalization
+    :return: List[int], a sequence which be normalized for its length
+    """
+
+    if len(token_indexes) > max_len:
+        return token_indexes[:max_len]
+
+    else:
+        padded_token_indexes = token_indexes.copy()
+        for i in range(max_len - len(token_indexes)):
+            padded_token_indexes.append(default_padding_val)
+
+        return padded_token_indexes
 
 
-def collate_func(samples, tokenizer: Callable, vocab: Vocab, labels_mapping: dict):
+# 8*. Init the collection function of the dataLoader
+def collate_func(samples: List[Tuple[str, str]], tokenizer: Callable, vocab: Vocab, labels_mapping: dict,
+                 max_len: int) -> dict:
     # 0. Separate texts and labels from the parameter samples(the element of samples is tuple)
+    """
+     zip(*parameter): the "parameter" must be a list of tuples, and this function is separate it to two list which
+     consists of the parameter[i][0] and parameter[i][-1]
+    """
     texts, labels = list(zip(*samples))
 
     # 1. Texts:
@@ -186,11 +217,111 @@ def collate_func(samples, tokenizer: Callable, vocab: Vocab, labels_mapping: dic
     #   + covert the tokens to indexes
     #   + padding
     #   + convert to a tensor
+    texts = torch.tensor(list(
+        map(
+            lambda current_text: pad(vocab(tokenizer(current_text)), max_len=max_len),
+            texts
+        )
+    ))
 
     # 2. Labels:
     #   + convert the textual labels to integer label
     #   + convert to a tensor
+    labels = torch.tensor(list(
+        map(
+            lambda current_label: labels_mapping[current_label],
+            labels
+        )
+    ))
 
+    # Recommend to return the dictionary
+    return {
+        "texts": texts,
+        "labels": labels
+    }
+
+
+# 9.1 Define the procedure of training
+def train(model, criterion, optimizer, train_loader: DataLoader):
+    # sign the "train" label
+    model.train()
+
+    # create a variable named "losses" to store the training losses
+    losses = []
+    for batch in tqdm(train_loader):
+        texts = batch["texts"].to(device)
+        labels = batch["labels"].to(device)
+
+        # the result of prediction in this step
+        current_prediction = model(texts)
+
+        # criterion function: input[batch_size, num_labels], output[batch_size]
+        current_loss = criterion(current_prediction, labels)
+        losses.append(current_loss)
+
+        # back propagation
+        optimizer.zero_grad()
+        current_loss.backward()
+        optimizer.step()
+
+    # calculate and print the training loss for this epoch
+    train_loss = torch.tensor(losses).mean()
+    print(f"Train Loss : {train_loss:.3f}")
+
+
+# 9.2 Define the procedure of validation
+def validate(model, criterion, dev_loader: DataLoader) -> float:
+    # sign the "validate" label
+    model.eval()
+
+    # init "all_prediction" and "all_labels" to store the all results of prediction and labels in dev data
+    all_labels = []
+    all_predictions = []
+
+    # init the variable "losses" to store all loss in dev data
+    losses = []
+
+    # the validation step doesn't need gradient descent
+    with torch.no_grad():
+        for batch in dev_loader:
+            texts = batch["texts"].to(device)
+            labels = batch["labels"].to(device)
+
+            predictions = model(texts)
+
+            loss = criterion(predictions, labels)
+            losses.append(loss.item())
+
+            all_labels.append(labels)
+            # predictions are the shape as [batch_size, 4]
+            all_predictions.append(predictions.argmax(dim=-1))
+
+    # all_labels and all_predictions are list of many tensors, so need to concatenate them to a tensor
+    all_labels = torch.cat(all_labels)
+    all_predictions = torch.cat(all_predictions)
+
+    valid_loss = torch.tensor(losses).mean()
+
+    # accuracy_score function is not compatible with tensor, so we need to change them to numpy
+    valid_acc = accuracy_score(
+        y_true=all_labels.detach().cpu().numpy(),
+        y_pred=all_predictions.detach().cpu().numpy()
+    )
+
+    print(f"Valid Loss : {valid_loss:.3f}")
+    print(f"Valid Acc  : {valid_acc:.3f}")
+
+    return valid_loss
+
+
+# 9.3 Define the procedure of testing: don't need to calculate the loss
+def test(best_model, test_loader: DataLoader, label_mapping: dict):
+    ...
+
+
+# 9.4 Define the procedure of prediction to apply for application
+def predict():
+    ...
 
 if __name__ == "__main__":
     # 1. Load the data
@@ -198,13 +329,13 @@ if __name__ == "__main__":
     dev_dataset = AGNewsDataset("text_data/dev.csv")
     test_dataset = AGNewsDataset("text_data/test.csv")
 
-    # 2. Init the tokenizer
+    # 2. Init the tokenizer [tokenizer -> input: text:str, output: tokens:list(str)]
     tokenizer = get_tokenizer("basic_english")
 
-    # 3. Init the vocabulary
+    # 3. Init the vocabulary [vocab -> input: tokens:list(str), output: indexes:list(int)]
     vocab = create_vocab(train_dataset.texts, tokenizer, 5)
 
-    # 4. Create the label mapping
+    # 4. Create the label mapping [labels_mapping -> input: textual labels:list(str), output: labels_indexes:list(int)]
     labels_mapping = create_labels_mapping(train_dataset.labels)
 
     # 5. Construct the model
@@ -227,7 +358,7 @@ if __name__ == "__main__":
         lr=lr,
     )
 
-    # 8. Construct the dataloader
+    # 8. Construct the dataLoader
     batch_size = 64
     train_loader = DataLoader(
         dataset=train_dataset,
@@ -250,3 +381,11 @@ if __name__ == "__main__":
         shuffle=False,
         collate_fn=collate_func
     )
+
+    # 9. Start to train the model
+    best_model = None
+    min_validate_loss = float("inf")
+    epoch = 10
+
+    for i in range(epoch):
+        ...
