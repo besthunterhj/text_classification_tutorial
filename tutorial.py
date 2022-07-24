@@ -1,3 +1,4 @@
+import copy
 import csv
 import re
 from typing import Dict, List, Tuple
@@ -10,7 +11,7 @@ from torchtext.vocab import vocab as vc
 from torchtext.data import get_tokenizer
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 
 device = torch.device(
     "cuda" if torch.cuda.is_available() else "cpu"
@@ -67,7 +68,6 @@ class AGNewsDataset(Dataset):
                 # remove the meaningless char
                 text = re.sub("&[A-Za-z]{1,2};", "", text)
                 text = re.sub(" #[0-9]{2};", "", text)
-                text = text.replace("\\", " ")
                 text = re.sub("[A-Za-z]{1,10}=[A-Za-z0-9]{1,10} ", "", text)
                 text = re.sub("[A-Za-z]{1,10}=\"{1, 2}[\\w]\"{1,2}", "", text)
                 text = re.sub("[A-Za-z]{1,10}=[\"]{1,2}http[s]{0,1}://([\w.]+/?)\S*", "", text)
@@ -128,7 +128,7 @@ def create_vocab(texts: list, tokenizer: Callable, min_freq: int, unknown_token:
 def create_labels_mapping(labels: list) -> Dict[str, int]:
     labels = list(set(labels))
     # sort the labels by their first character
-    sorted(labels, reverse=True)
+    labels = sorted(labels, reverse=True)
     labels_mapping = {
         textual_label: index
         for index, textual_label in enumerate(labels)
@@ -181,27 +181,6 @@ class RNNTextClassifier(nn.Module):
         return y_hat
 
 
-# 8** Init the padding function of the collection function
-def pad(token_indexes: List[int], max_len: int, default_padding_val: int = 0) -> List[int]:
-    """
-    Normalize the length of current list of token_indexes, so it can change to part of tensor
-    :param default_padding_val: the default index of the character <pad>
-    :param token_indexes: the indexes for tokens of current text
-    :param max_len: the maximum length of normalization
-    :return: List[int], a sequence which be normalized for its length
-    """
-
-    if len(token_indexes) > max_len:
-        return token_indexes[:max_len]
-
-    else:
-        padded_token_indexes = token_indexes.copy()
-        for i in range(max_len - len(token_indexes)):
-            padded_token_indexes.append(default_padding_val)
-
-        return padded_token_indexes
-
-
 # 8*. Init the collection function of the dataLoader
 def collate_func(samples: List[Tuple[str, str]], tokenizer: Callable, vocab: Vocab, labels_mapping: dict,
                  max_len: int) -> dict:
@@ -239,6 +218,27 @@ def collate_func(samples: List[Tuple[str, str]], tokenizer: Callable, vocab: Voc
         "texts": texts,
         "labels": labels
     }
+
+
+# 8** Init the padding function of the collection function
+def pad(token_indexes: List[int], max_len: int, default_padding_val: int = 0) -> List[int]:
+    """
+    Normalize the length of current list of token_indexes, so it can change to part of tensor
+    :param default_padding_val: the default index of the character <pad>
+    :param token_indexes: the indexes for tokens of current text
+    :param max_len: the maximum length of normalization
+    :return: List[int], a sequence which be normalized for its length
+    """
+
+    if len(token_indexes) > max_len:
+        return token_indexes[:max_len]
+
+    else:
+        padded_token_indexes = token_indexes.copy()
+        for i in range(max_len - len(token_indexes)):
+            padded_token_indexes.append(default_padding_val)
+
+        return padded_token_indexes
 
 
 # 9.1 Define the procedure of training
@@ -284,6 +284,7 @@ def validate(model, criterion, dev_loader: DataLoader) -> float:
     # the validation step doesn't need gradient descent
     with torch.no_grad():
         for batch in dev_loader:
+            # get the data of samples in each batch
             texts = batch["texts"].to(device)
             labels = batch["labels"].to(device)
 
@@ -315,13 +316,66 @@ def validate(model, criterion, dev_loader: DataLoader) -> float:
 
 
 # 9.3 Define the procedure of testing: don't need to calculate the loss
-def test(best_model, test_loader: DataLoader, label_mapping: dict):
-    ...
+def test(model, test_loader: DataLoader, labels_mapping: dict):
+
+    # init "all_prediction" and "all_labels" to store the all results of prediction and labels in dev data
+    all_labels = []
+    all_predictions = []
+
+    with torch.no_grad():
+        for batch in test_loader:
+            texts = batch["texts"].to(device)
+            labels = batch["labels"].to(device)
+
+            predictions = model(texts)
+
+            all_labels.append(labels)
+            # predictions are the shape as [batch_size, 4]
+            all_predictions.append(predictions.argmax(dim=-1))
+
+    all_labels = torch.cat(all_labels).detach().cpu().numpy()
+    all_predictions = torch.cat(all_predictions).detach().cpu().numpy()
+
+    # show the results of testing
+    test_acc = accuracy_score(
+        y_true=all_labels,
+        y_pred=all_predictions,
+    )
+
+    print(f"Test Acc   : {test_acc:.3f}")
+
+    print("\nClassification Report : ")
+    print(classification_report(all_labels, all_predictions, target_names=labels_mapping.keys()))
+
+    print("\nConfusion Matrix : ")
+    print(confusion_matrix(all_labels, all_predictions))
 
 
 # 9.4 Define the procedure of prediction to apply for application
-def predict():
-    ...
+def predict(model, text: str, tokenizer: Callable, vocab: Vocab, labels_mapping: dict):
+
+    # get the tokens from the text
+    tokens = tokenizer(text)
+
+    # change the textual tokens to their indexes
+    indexes = vocab(tokens)
+
+    # Because the model only accept the mini-batch data, we need to change the shape of indexes
+    temp_input = torch.tensor([indexes]).to(device)
+
+    with torch.no_grad():
+        prediction = model(temp_input)
+
+    # the reason that add ".item()" : get the data from a tensor
+    prediction_index = prediction[0].argmax(dim=0).item()
+
+    prediction_label = {
+        index: label for label, index in labels_mapping.items()
+    }[prediction_index]
+
+    print(f"\ntext: {text}")
+    print(f"prediction: {prediction_label}")
+
 
 if __name__ == "__main__":
     # 1. Load the data
@@ -347,6 +401,7 @@ if __name__ == "__main__":
         hidden_dim=hidden_dim,
         labels_len=len(labels_mapping)
     )
+    model.to(device=device)
 
     # 6. Choose the loss function
     criterion = nn.CrossEntropyLoss()
@@ -358,13 +413,23 @@ if __name__ == "__main__":
         lr=lr,
     )
 
+    max_len = 25
+
+    collate_fc = lambda samples: collate_func(
+        samples=samples,
+        tokenizer=tokenizer,
+        vocab=vocab,
+        max_len=max_len,
+        labels_mapping=labels_mapping,
+    )
+
     # 8. Construct the dataLoader
     batch_size = 64
     train_loader = DataLoader(
         dataset=train_dataset,
         batch_size=batch_size,
         shuffle=True,
-        collate_fn=collate_func
+        collate_fn=collate_fc
     )
 
     # dev and test loader don't need to be shuffle
@@ -372,14 +437,14 @@ if __name__ == "__main__":
         dataset=dev_dataset,
         batch_size=batch_size,
         shuffle=False,
-        collate_fn=collate_func
+        collate_fn=collate_fc
     )
 
     test_loader = DataLoader(
         dataset=test_dataset,
         batch_size=batch_size,
         shuffle=False,
-        collate_fn=collate_func
+        collate_fn=collate_fc
     )
 
     # 9. Start to train the model
@@ -388,4 +453,38 @@ if __name__ == "__main__":
     epoch = 10
 
     for i in range(epoch):
-        ...
+        print(f"Epoch: {i + 1}")
+        train(
+            model=model,
+            criterion=criterion,
+            optimizer=optimizer,
+            train_loader=train_loader,
+        )
+
+        validate_loss = validate(
+            model=model,
+            criterion=criterion,
+            dev_loader=dev_loader,
+        )
+
+        print()
+        # Update and store the best model
+        if validate_loss < min_validate_loss:
+            min_validate_loss = validate_loss
+            # assign the memory and copy the whole model
+            best_model = copy.deepcopy(model)
+
+    best_model.to(device=device)
+    test(
+        model=best_model,
+        test_loader=test_loader,
+        labels_mapping=labels_mapping,
+    )
+
+    predict(
+        model=best_model,
+        text="Roddick to Lead U.S. Against Belarus (AP),AP - Andy Roddick and the rest of the U.S. Davis Cup team figure it's about time the country reclaimed the championship.",
+        tokenizer=tokenizer,
+        vocab=vocab,
+        labels_mapping=labels_mapping,
+    )
