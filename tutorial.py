@@ -1,3 +1,4 @@
+import argparse
 import copy
 import csv
 import re
@@ -12,6 +13,8 @@ from torchtext.data import get_tokenizer
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from tqdm import tqdm
+
 
 device = torch.device(
     "cuda" if torch.cuda.is_available() else "cpu"
@@ -19,9 +22,6 @@ device = torch.device(
 
 
 # 1. Create a class named AGNewsDataset to read the train, valid, test data
-from tqdm import tqdm
-
-
 class AGNewsDataset(Dataset):
     def __init__(self, fp: str):
         """
@@ -48,7 +48,7 @@ class AGNewsDataset(Dataset):
         return current_text, current_label
 
     @classmethod
-    def read(cls, fp: str):
+    def read(cls, fp: str) -> Tuple[list, list]:
         """
         Read the data from dataset and return text_list and label_list
         :param fp: the path of the target file
@@ -126,6 +126,7 @@ def create_vocab(texts: list, tokenizer: Callable, min_freq: int, unknown_token:
 
 # 4. Create the label mapping to map the label to its index correspondingly
 def create_labels_mapping(labels: list) -> Dict[str, int]:
+    # get the textual labels and remove what repeats
     labels = list(set(labels))
     # sort the labels by their first character
     labels = sorted(labels, reverse=True)
@@ -162,7 +163,7 @@ class RNNTextClassifier(nn.Module):
     # 5.2 Init the process of the model
     def forward(self, x: torch.tensor) -> torch.tensor:
         """
-
+        The procedure of the forward propagation, telling what should do to the model
         :param x: the input of the model, its size must be [batch_size, text_len]
         :return:
         """
@@ -181,7 +182,7 @@ class RNNTextClassifier(nn.Module):
         return y_hat
 
 
-# 8*. Init the collection function of the dataLoader
+# 8*. Init the collection function of the dataLoader (this is the necessary step before utilizing the data_loader)
 def collate_func(samples: List[Tuple[str, str]], tokenizer: Callable, vocab: Vocab, labels_mapping: dict,
                  max_len: int) -> dict:
     # 0. Separate texts and labels from the parameter samples(the element of samples is tuple)
@@ -221,6 +222,7 @@ def collate_func(samples: List[Tuple[str, str]], tokenizer: Callable, vocab: Voc
 
 
 # 8** Init the padding function of the collection function
+# (this is the necessary step for handling the length of each sentence that input to the model)
 def pad(token_indexes: List[int], max_len: int, default_padding_val: int = 0) -> List[int]:
     """
     Normalize the length of current list of token_indexes, so it can change to part of tensor
@@ -377,7 +379,8 @@ def predict(model, text: str, tokenizer: Callable, vocab: Vocab, labels_mapping:
     print(f"prediction: {prediction_label}")
 
 
-if __name__ == "__main__":
+# 10. the procedure of the task
+def main(args: argparse.Namespace):
     # 1. Load the data
     train_dataset = AGNewsDataset("text_data/train.csv")
     dev_dataset = AGNewsDataset("text_data/dev.csv")
@@ -387,18 +390,16 @@ if __name__ == "__main__":
     tokenizer = get_tokenizer("basic_english")
 
     # 3. Init the vocabulary [vocab -> input: tokens:list(str), output: indexes:list(int)]
-    vocab = create_vocab(train_dataset.texts, tokenizer, 5)
+    vocab = create_vocab(texts=train_dataset.texts, tokenizer=tokenizer, min_freq=args.min_freq)
 
     # 4. Create the label mapping [labels_mapping -> input: textual labels:list(str), output: labels_indexes:list(int)]
-    labels_mapping = create_labels_mapping(train_dataset.labels)
+    labels_mapping = create_labels_mapping(labels=train_dataset.labels)
 
     # 5. Construct the model
-    embedding_dim = 100
-    hidden_dim = 50
     model = RNNTextClassifier(
         vocab_len=len(vocab),
-        embedding_dim=embedding_dim,
-        hidden_dim=hidden_dim,
+        embedding_dim=args.embedding_dim,
+        hidden_dim=args.hidden_dim,
         labels_len=len(labels_mapping)
     )
     model.to(device=device)
@@ -407,27 +408,23 @@ if __name__ == "__main__":
     criterion = nn.CrossEntropyLoss()
 
     # 7. Choose the optimizer
-    lr = 1e-3
     optimizer = Adam(
         params=model.parameters(),
-        lr=lr,
+        lr=args.lr,
     )
-
-    max_len = 25
 
     collate_fc = lambda samples: collate_func(
         samples=samples,
         tokenizer=tokenizer,
         vocab=vocab,
-        max_len=max_len,
+        max_len=args.max_len,
         labels_mapping=labels_mapping,
     )
 
     # 8. Construct the dataLoader
-    batch_size = 64
     train_loader = DataLoader(
         dataset=train_dataset,
-        batch_size=batch_size,
+        batch_size=args.train_batch_size,
         shuffle=True,
         collate_fn=collate_fc
     )
@@ -435,24 +432,23 @@ if __name__ == "__main__":
     # dev and test loader don't need to be shuffle
     dev_loader = DataLoader(
         dataset=dev_dataset,
-        batch_size=batch_size,
+        batch_size=args.dev_batch_size,
         shuffle=False,
         collate_fn=collate_fc
     )
 
     test_loader = DataLoader(
         dataset=test_dataset,
-        batch_size=batch_size,
+        batch_size=args.test_batch_size,
         shuffle=False,
         collate_fn=collate_fc
     )
 
-    # 9. Start to train the model
+    # 9. Start to train, develop, test the model
     best_model = None
     min_validate_loss = float("inf")
-    epoch = 10
 
-    for i in range(epoch):
+    for i in range(args.epoch_num):
         print(f"Epoch: {i + 1}")
         train(
             model=model,
@@ -488,3 +484,23 @@ if __name__ == "__main__":
         vocab=vocab,
         labels_mapping=labels_mapping,
     )
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+
+    # data parameters
+    parser.add_argument("--min-freq", type=int, default=5, help="Minimum frequency of words added to vocab")
+    parser.add_argument("--max-len", type=int, default=25, help="Max length of sentences be input to the dataLoader")
+    # model parameters
+    parser.add_argument("embedding-dim", type=int, default=100, help="the dimension of the word embedding")
+    parser.add_argument("hidden-dim", type=int, default=50, help="the dimension of the vectors from hidden layer")
+    # process parameters
+    parser.add_argument("lr", type=int, default=1e-3, help="Learning rate")
+    parser.add_argument("train-batch-size", type=int, default=64, help="The size of training batch")
+    parser.add_argument("dev-batch-size", type=int, default=64, help="The size of validation batch")
+    parser.add_argument("test-batch-size", type=int, default=64, help="The size of testing batch")
+    parser.add_argument("epoch-num", type=int, default=10, help="The number of the training epochs")
+
+    args = parser.parse_args()
+    main(args)
