@@ -40,3 +40,32 @@ class RNNTextClassifier(nn.Module):
         y_hat = self.linear(last_hidden)
 
         return y_hat
+
+
+class StackedRNNTextClassifier(nn.Module):
+    def __init__(self, vocab_len: int, embedding_dim: int, hidden_dim: int, labels_len: int):
+        self.embedding_dim = embedding_dim
+        self.hidden_dim = hidden_dim * 6
+
+        self.embedding = nn.Embedding(num_embeddings=vocab_len, embedding_dim=embedding_dim)
+        self.rnn = nn.RNN(
+            input_size=self.embedding_dim,
+            hidden_size=self.hidden_dim,
+            batch_first=True,
+            nonlinearity='relu',
+            num_layers=3,
+            bidirectional=True,
+        )
+        self.Linear = nn.Linear(in_features=self.hidden_dim, out_features=labels_len)
+
+    def forward(self, x: torch.tensor) -> torch.tensor:
+
+        embeddings = self.embedding(x)
+
+        _, last_hidden = self.rnn(embeddings)
+
+        last_hidden = torch.cat(last_hidden, dim=0)
+
+        y_hat = self.linear(last_hidden)
+
+        return y_hat
