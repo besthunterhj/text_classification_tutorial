@@ -5,7 +5,7 @@ from collections.abc import Callable
 
 import torch
 from torch.utils.data import Dataset
-from torchtext.vocab import Vocab
+# from torchtext.vocab import Vocab
 
 
 class AGNewsDataset(Dataset):
@@ -46,10 +46,17 @@ class AGNewsDataset(Dataset):
         with open(fp) as file:
             csv_reader = csv.reader(file)
             for line in csv_reader:
-                news_category, news_title, news_body = line
+                news_category = line[0]
+                text = ""
+                for i in range(1, len(line)):
+                    if i > 1:
+                        text = text + " "
+                    text = text + line[i]
+                # news_category, news_title, news_body = line
+                # news_category, text = line
 
                 # build the data_x
-                text = news_title + " " + news_body
+                # text = news_title + " " + news_body
 
                 # remove the meaningless char
                 text = re.sub("&[A-Za-z]{1,2};", "", text)
@@ -87,7 +94,7 @@ def pad(token_indexes: List[int], max_len: int, default_padding_val: int = 0) ->
         return padded_token_indexes
 
 
-def collate_func(samples: List[Tuple[str, str]], tokenizer: Callable, vocab: Vocab, labels_mapping: dict,
+def collate_func(samples: List[Tuple[str, str]], tokenizer: Callable, vocab, labels_mapping: dict,
                  max_len: int) -> dict:
     """
      zip(*parameter): the "parameter" must be a list of tuples, and this function is separate it to two list which
