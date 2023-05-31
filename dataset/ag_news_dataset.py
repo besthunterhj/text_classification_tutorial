@@ -5,7 +5,7 @@ from collections.abc import Callable
 
 import torch
 from torch.utils.data import Dataset
-# from torchtext.vocab import Vocab
+from torchtext.vocab import Vocab
 
 
 class AGNewsDataset(Dataset):
@@ -73,6 +73,29 @@ class AGNewsDataset(Dataset):
 
         return text_data, labels
 
+        # with open(fp) as file:
+        #     csv_reader = csv.reader(file)
+        #     for line in csv_reader:
+        #         news_category, news_title, news_body = line
+        #
+        #         # build the data_x
+        #         text = news_title + " " + news_body
+        #
+        #         # remove the meaningless char
+        #         text = re.sub("&[A-Za-z]{1,2};", "", text)
+        #         text = re.sub(" #[0-9]{2};", "", text)
+        #         text = re.sub("[A-Za-z]{1,10}=[A-Za-z0-9]{1,10} ", "", text)
+        #         text = re.sub("[A-Za-z]{1,10}=\"{1, 2}[\\w]\"{1,2}", "", text)
+        #         text = re.sub("[A-Za-z]{1,10}=[\"]{1,2}http[s]{0,1}://([\w.]+/?)\S*", "", text)
+        #         text = re.sub("target=[\s\w/]{1,50}\"\"", "", text)
+        #
+        #         text_data.append(text)
+        #
+        #         # build the data_y
+        #         labels.append(news_category)
+        #
+        # return text_data, labels
+
 
 def pad(token_indexes: List[int], max_len: int, default_padding_val: int = 0) -> List[int]:
     """
@@ -94,7 +117,7 @@ def pad(token_indexes: List[int], max_len: int, default_padding_val: int = 0) ->
         return padded_token_indexes
 
 
-def collate_func(samples: List[Tuple[str, str]], tokenizer: Callable, vocab, labels_mapping: dict,
+def collate_func(samples: List[Tuple[str, str]], tokenizer: Callable, vocab: Vocab, labels_mapping: dict,
                  max_len: int) -> dict:
     """
      zip(*parameter): the "parameter" must be a list of tuples, and this function is separate it to two list which

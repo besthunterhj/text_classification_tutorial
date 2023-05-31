@@ -15,6 +15,7 @@ from utils.training_utils import device
 from utils.preprocessing_utils import create_labels_mapping, create_vocab
 from dataset.ag_news_dataset import AGNewsDataset, collate_func
 from model.model import RNNTextClassifier
+from bigru_attention_model import BiGRUAttention
 
 
 def train(model, criterion, optimizer, train_loader: DataLoader):
@@ -152,6 +153,7 @@ def predict(model, text: str, tokenizer: Callable, vocab: Vocab, labels_mapping:
 def main(args: argparse.Namespace):
     # 1. Load the data
     train_dataset = AGNewsDataset("text_data/train.csv")
+    # train_dataset = AGNewsDataset("text_data/train_augmentated.csv")
     dev_dataset = AGNewsDataset("text_data/dev.csv")
     test_dataset = AGNewsDataset("text_data/test.csv")
 
@@ -160,19 +162,26 @@ def main(args: argparse.Namespace):
 
     # 3. Init the vocabulary [vocab -> input: tokens:list(str), output: indexes:list(int)]
     vocab = create_vocab(texts=train_dataset.texts, tokenizer=tokenizer, min_freq=args.min_freq)
-    print(vocab)
-    exit()
-
+    # print(vocab)
+    # exit()
 
     # 4. Create the label mapping [labels_mapping -> input: textual labels:list(str), output: labels_indexes:list(int)]
     labels_mapping = create_labels_mapping(labels=train_dataset.labels)
 
     # 5. Construct the model
-    model = RNNTextClassifier(
-        vocab_len=len(vocab),
-        embedding_dim=args.embedding_dim,
-        hidden_dim=args.hidden_dim,
-        labels_len=len(labels_mapping)
+    # model = RNNTextClassifier(
+    #     vocab_len=len(vocab),
+    #     embedding_dim=args.embedding_dim,
+    #     hidden_dim=args.hidden_dim,
+    #     labels_len=len(labels_mapping)
+    # )
+    model = BiGRUAttention(
+        vocab_size=len(vocab),
+        embedding_size=100,
+        hidden_size=100,
+        layer_num=1,
+        dropout=0.2,
+        label_num=len(labels_mapping)
     )
     model.to(device=device)
 
