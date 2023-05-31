@@ -160,6 +160,9 @@ def main(args: argparse.Namespace):
 
     # 3. Init the vocabulary [vocab -> input: tokens:list(str), output: indexes:list(int)]
     vocab = create_vocab(texts=train_dataset.texts, tokenizer=tokenizer, min_freq=args.min_freq)
+    print(vocab)
+    exit()
+
 
     # 4. Create the label mapping [labels_mapping -> input: textual labels:list(str), output: labels_indexes:list(int)]
     labels_mapping = create_labels_mapping(labels=train_dataset.labels)
@@ -259,17 +262,17 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # data parameters
-    parser.add_argument("--min-freq", type=int, default=5, help="Minimum frequency of words added to vocab")
-    parser.add_argument("--max-len", type=int, default=25, help="Max length of sentences be input to the dataLoader")
+    parser.add_argument("--min_freq", type=int, default=3, help="Minimum frequency of words added to vocab")
+    parser.add_argument("--max_len", type=int, default=25, help="Max length of sentences be input to the dataLoader")
     # model parameters
-    parser.add_argument("embedding-dim", type=int, default=100, help="the dimension of the word embedding")
-    parser.add_argument("hidden-dim", type=int, default=50, help="the dimension of the vectors from hidden layer")
+    parser.add_argument("--embedding_dim", type=int, default=100, help="the dimension of the word embedding")
+    parser.add_argument("--hidden_dim", type=int, default=50, help="the dimension of the vectors from hidden layer")
     # process parameters
-    parser.add_argument("lr", type=int, default=1e-3, help="Learning rate")
-    parser.add_argument("train-batch-size", type=int, default=64, help="The size of training batch")
-    parser.add_argument("dev-batch-size", type=int, default=64, help="The size of validation batch")
-    parser.add_argument("test-batch-size", type=int, default=64, help="The size of testing batch")
-    parser.add_argument("epoch-num", type=int, default=10, help="The number of the training epochs")
+    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
+    parser.add_argument("--train_batch_size", type=int, default=64, help="The size of training batch")
+    parser.add_argument("--dev_batch_size", type=int, default=32, help="The size of validation batch")
+    parser.add_argument("--test_batch_size", type=int, default=32, help="The size of testing batch")
+    parser.add_argument("--epoch_num", type=int, default=10, help="The number of the training epochs")
 
     args = parser.parse_args()
     main(args)
